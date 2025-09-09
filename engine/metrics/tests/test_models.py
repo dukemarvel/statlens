@@ -11,11 +11,28 @@ from teams.models import Team
 
 class MetricTypeModelTests(TestCase):
     def test_str_uses_display_name_else_key(self):
-        m1 = MetricType.objects.create(key="corners", unit="count", display_name="Corners", decimals=0)
-        m2 = MetricType.objects.create(key="shots_on_target", unit="count", display_name="", decimals=0)
+        # corners may already exist (seeded) → get_or_create
+        m1, _ = MetricType.objects.get_or_create(
+            key="corners",
+            defaults={"unit": "count", "display_name": "Corners", "decimals": 0},
+        )
+        # Ensure display_name is set for this assertion
+        if not m1.display_name:
+            m1.display_name = "Corners"
+            m1.save(update_fields=["display_name"])
+
+        # shots_on_target may exist; ensure we test the fallback behavior
+        m2, _ = MetricType.objects.get_or_create(
+            key="shots_on_target",
+            defaults={"unit": "count", "display_name": "", "decimals": 0},
+        )
+        # Force empty display_name so __str__ falls back to key (isolated per test txn)
+        m2.display_name = ""
+        m2.save(update_fields=["display_name"])
+
         self.assertEqual(str(m1), "Corners")
         self.assertEqual(str(m2), "shots_on_target")
-
+        
     def test_unique_key(self):
         MetricType.objects.get_or_create(key="cards_total", defaults={"unit": "count", "display_name": "Cards"})
         with self.assertRaises(IntegrityError):
