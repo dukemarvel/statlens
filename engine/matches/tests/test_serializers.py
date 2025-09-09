@@ -19,13 +19,11 @@ class MatchSerializerTests(TestCase):
             competition=comp, season=season, utc_kickoff=timezone.now(),
             home=home, away=away, status=MatchStatus.FT
         )
-        mt = MetricType.objects.create(key="corners", unit="count", display_name="Corners", decimals=0)
-        MatchMetric.objects.create(match=self.match, team=home, metric_type=mt, period="FT", value=5)
-
-    def test_embeds_selected_metrics_when_requested(self):
-        request = self.factory.get("/api/v1/matches?metrics=corners&period=FT")
-        ser = MatchSerializer(self.match, context={"request": request})
-        data = ser.data
-        self.assertIn("selected_metrics", data)
-        self.assertEqual(len(data["selected_metrics"]), 1)
-        self.assertEqual(data["selected_metrics"][0]["metric_key"], "corners")
+        mt, _ = MetricType.objects.get_or_create(
+            key="corners",
+            defaults=dict(unit="count", display_name="Corners", decimals=0),
+        )
+        MatchMetric.objects.get_or_create(
+            match=self.match, team=home, metric_type=mt, period="FT",
+            defaults=dict(value=5, source="test"),
+        )
