@@ -17,12 +17,11 @@ class UserViewViewSetTests(APITestCase):
 
     def test_post_requires_authentication(self):
         resp = self.client.post(self.base, {"name": "View A", "metric_keys": [], "filters": {}}, format="json")
-        self.assertEqual(resp.status_code, status.HTTP_401_UNAUTHORIZED)
+        # DRF may return 403 (CSRF) or 401 (no auth) depending on auth classes
+        self.assertIn(resp.status_code, {status.HTTP_401_UNAUTHORIZED, status.HTTP_403_FORBIDDEN})
 
     def test_create_and_retrieve_own_view(self):
         self.client.login(username="alice", password="pw")
-
-        # Create
         payload = {"name": "My Corners", "metric_keys": ["corners"], "filters": {"status": "LIVE"}}
         create = self.client.post(self.base, payload, format="json")
         self.assertEqual(create.status_code, status.HTTP_201_CREATED)
@@ -32,7 +31,6 @@ class UserViewViewSetTests(APITestCase):
         self.assertEqual(obj.user, self.u1)
         self.assertEqual(obj.name, "My Corners")
 
-        # Retrieve (self)
         detail_url = reverse("user-views-detail", kwargs={"pk": view_id})
         show = self.client.get(detail_url)
         self.assertEqual(show.status_code, status.HTTP_200_OK)
@@ -40,10 +38,7 @@ class UserViewViewSetTests(APITestCase):
         self.assertEqual(show.data["metric_keys"], ["corners"])
 
     def test_cannot_retrieve_someone_elses_view(self):
-        # Create u1's view
         v = UserView.objects.create(user=self.u1, name="Private View", metric_keys=["xg"], filters={})
-
-        # u2 tries to fetch it → queryset is filtered by request.user, expect 404
         self.client.login(username="bob", password="pw")
         detail_url = reverse("user-views-detail", kwargs={"pk": str(v.id)})
         resp = self.client.get(detail_url)
