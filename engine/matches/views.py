@@ -1,11 +1,14 @@
+from rest_framework.decorators import action
 from rest_framework import viewsets, mixins
 from .models import Match
 from .serializers import MatchSerializer
 from metrics.models import MatchMetric
 from rest_framework.response import Response
+from metrics.serializers import MatchMetricSerializer
+from core.http import ConditionalHeadersMixin
 
 
-class MatchViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, viewsets.GenericViewSet):
+class MatchViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, viewsets.GenericViewSet, ConditionalHeadersMixin):
     serializer_class = MatchSerializer
 
     def get_queryset(self):
@@ -30,20 +33,24 @@ class MatchViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, viewsets.Ge
             qs = qs.filter(status__in=statuses)
 
         return qs
-
-class MatchMetricsViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
-    """
-    GET /matches/{id}/metrics?period=FT  → all metrics for a match+period
-    """
-    serializer_class = None  # we'll return a simple JSON dict
-
+    
     def list(self, request, *args, **kwargs):
-        from metrics.serializers import MatchMetricSerializer
-        match_id = kwargs["match_pk"] if "match_pk" in kwargs else kwargs["pk"]
+        response = super().list(request, *args, **kwargs)
+        qs = self.get_queryset()
+        return self.set_conditional_headers(request, response, qs)
+
+    def retrieve(self, request, *args, **kwargs):
+        response = super().retrieve(request, *args, **kwargs)
+        # for retrieve, use a QS limited to that object to compute headers
+        obj_qs = self.get_queryset().filter(pk=kwargs["pk"])
+        return self.set_conditional_headers(request, response, obj_qs)
+    
+    @action(detail=True, methods=["get"], url_path="metrics")
+    def metrics(self, request, pk=None):
+        """GET /api/v1/matches/{id}/metrics?period=FT"""
         period = request.query_params.get("period", "FT")
         qs = (MatchMetric.objects
               .select_related("metric_type")
-              .filter(match_id=match_id, period=period)
+              .filter(match_id=pk, period=period)
               .order_by("team_id", "metric_type__key"))
-        ser = MatchMetricSerializer(qs, many=True)
-        return Response(ser.data)
+        return Response(MatchMetricSerializer(qs, many=True).data)
