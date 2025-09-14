@@ -11,7 +11,7 @@ from .base import ProviderAdapter, RateLimitError, ProviderError
 logger = logging.getLogger(__name__)
 
 API_FOOTBALL_KEY = os.getenv("API_FOOTBALL_KEY")
-API_FOOTBALL_BASE = os.getenv("API_FOOTBALL_BASE", "https://api-football-v1.p.rapidapi.com/v3")
+API_FOOTBALL_BASE = os.getenv("API_FOOTBALL_BASE", "https://v3.football.api-sports.io")
 
 def _build_session(retries=3, backoff_factor=0.5, status_forcelist=(429, 500, 502, 503, 504)):
     s = requests.Session()
@@ -38,8 +38,7 @@ class APIFootballAdapter(ProviderAdapter):
         self.session = _build_session()
         # Headers for RapidAPI or native API; adjust if using vendor endpoint
         self.session.headers.update({
-            "x-rapidapi-host": "api-football-v1.p.rapidapi.com",
-            "x-rapidapi-key": self.api_key,
+            "x-apisports-key": self.api_key,
             "Accept": "application/json",
         })
 
@@ -88,3 +87,17 @@ class APIFootballAdapter(ProviderAdapter):
         # many APIs expose "statistics" or "events" endpoints; adjust accordingly
         # example: GET /fixtures/statistics?fixture=match_provider_id
         return self._request("fixtures/statistics", params={"fixture": match_provider_id})
+    
+    def fetch_fixtures_by_status(self, league: str, season: int, statuses: str) -> List[dict]:
+        # e.g. statuses = "FT-AET-PEN-1H-HT-2H-ET-BT-P"
+        return self._request("fixtures", params={"league": league, "season": season, "status": statuses})
+
+    def fetch_fixtures_by_ids(self, ids: List[int]) -> List[dict]:
+        out = []
+        for i in range(0, len(ids), 20):
+            chunk = ids[i:i+20]
+            resp = self._request("fixtures", params={"ids": "-".join(map(str, chunk))})
+            out.extend(resp if isinstance(resp, list) else [])
+            time.sleep(1)  # be nice on free tier
+        return out
+

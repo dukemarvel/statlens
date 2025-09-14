@@ -1,56 +1,68 @@
-from typing import Dict, Any, List, Tuple
+from typing import Dict, Any, List
 from datetime import datetime
 
-def normalize_fixture_api_football(fixture_payload: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Map API-Football fixture JSON to our Match data shape.
-    Keep these fields minimal: match_provider_id, utc_kickoff, competition_provider_id, season_name, home_provider_id, away_provider_id, venue, status
-    """
-    # The exact path depends on provider payload. Adjust these keys for the real API response.
-    fixture = fixture_payload.get("fixture") or fixture_payload
-    league = fixture_payload.get("league") or {}
-    teams = fixture_payload.get("teams") or {}
-    # sample mapping - update to actual provider keys in your environment
+STATUS_MAP = {
+    "NS":"SCHED","1H":"LIVE","HT":"HT","2H":"LIVE","ET":"AET","FT":"FT",
+    "P":"PEN","AET":"AET","PST":"PPD","CANC":"CANC","ABD":"ABD",
+}
+
+def normalize_fixture_api_football(fx: Dict[str, Any]) -> Dict[str, Any]:
+    fixture = fx.get("fixture", {})
+    league = fx.get("league", {})
+    teams = fx.get("teams", {})
+    ts = fixture.get("timestamp")
     return {
-        "provider_id": str(fixture.get("id") or fixture.get("fixture_id")),
-        "utc_kickoff": datetime.fromtimestamp(fixture.get("timestamp")) if fixture.get("timestamp") else fixture.get("date"),
-        "competition_provider_id": str(league.get("id") or league.get("league_id")),
-        "season_name": league.get("season") or None,
+        "provider_id": str(fixture.get("id")),
+        "utc_kickoff": datetime.utcfromtimestamp(ts) if ts else fixture.get("date"),
+        "competition_provider_id": str(league.get("id")),
+        "season_name": league.get("season"),
         "home_provider_id": str(teams.get("home", {}).get("id")),
         "away_provider_id": str(teams.get("away", {}).get("id")),
-        "venue": (fixture.get("venue") or {}).get("name"),
-        "status_text": (fixture.get("status") or {}).get("short") or "SCHED",
+        "venue": (fixture.get("venue") or {}).get("name") or "",
+        "status_text": STATUS_MAP.get((fixture.get("status") or {}).get("short", ""), "SCHED"),
     }
 
-def normalize_stats_api_football(stats_payload: Dict[str, Any]) -> List[Dict[str, Any]]:
+def normalize_stats_api_football(stats_payload: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """
-    Convert provider stats structure into a list of {metric_key, team_provider_id, value, period}
-    This is highly provider-specific; adjust when you inspect a real response.
-    Example return:
-      [
-        {"metric_key":"corners","team_provider_id":"33","value":5,"period":"FT"},
-        ...
-      ]
+    stats_payload is typically a list of two entries (home, away), each:
+      {"team":{"id":...},"statistics":[{"type":"Corner Kicks","value":5}, ...]}
+    We map:
+      - corners            <= ["Corner Kicks","Corners"]
+      - shots_on_target    <= ["Shots on Target","Shots on goal"]
+      - cards_total        <= sum(["Yellow Cards","Red Cards"])
     """
-    rows = []
-    # Example provider format: {"response":[{"team": {"id":..}, "statistics":[{"type":"Corner","value":5}, ...]}]}
-    for team_block in stats_payload:
+    rows: List[Dict[str, Any]] = []
+    CORNER_KEYS = {"corner kicks", "corners"}
+    SOT_KEYS = {"shots on target", "shots on goal"}
+
+    for team_block in (stats_payload or []):
         team = team_block.get("team") or {}
         tid = str(team.get("id"))
-        for stat in team_block.get("statistics", []):
-            t = stat.get("type", "").lower().replace(" ", "_")
-            # Map provider label to your metric key names
-            map_key = {
-                "corner": "corners",
-                "shots on target": "shots_on_target",
-                "yellow cards": "cards_total",  # simple mapping; you may want to split yellow/red
-            }.get(stat.get("type", "").strip().lower(), None)
+        if not tid:
+            continue
 
-            if map_key:
-                rows.append({
-                    "metric_key": map_key,
-                    "team_provider_id": tid,
-                    "value": stat.get("value"),
-                    "period": "FT",  # provider may include period; adjust accordingly
-                })
+        stats = team_block.get("statistics") or []
+        # normalize labels
+        kv = {}
+        for s in stats:
+            label = (s.get("type") or "").strip().lower()
+            kv[label] = s.get("value")
+
+        # corners
+        val_corners = next((kv[k] for k in CORNER_KEYS if k in kv), None)
+        if isinstance(val_corners, (int, float)):
+            rows.append({"metric_key": "corners", "team_provider_id": tid, "value": float(val_corners), "period": "FT"})
+
+        # shots on target
+        val_sot = next((kv[k] for k in SOT_KEYS if k in kv), None)
+        if isinstance(val_sot, (int, float)):
+            rows.append({"metric_key": "shots_on_target", "team_provider_id": tid, "value": float(val_sot), "period": "FT"})
+
+        # cards_total = yellow + red
+        y = kv.get("yellow cards")
+        r = kv.get("red cards")
+        if isinstance(y, (int, float)) or isinstance(r, (int, float)):
+            total = (float(y) if isinstance(y, (int, float)) else 0.0) + (float(r) if isinstance(r, (int, float)) else 0.0)
+            rows.append({"metric_key": "cards_total", "team_provider_id": tid, "value": total, "period": "FT"})
+
     return rows
