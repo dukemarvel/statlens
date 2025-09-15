@@ -16,10 +16,17 @@ import os
 # engine/engine/settings/base.py -> engine/  (project root with manage.py)
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
 
-DEBUG = False  # neutral in base
+# ---- load .env early ----
+try:
+    from dotenv import load_dotenv
+    load_dotenv(BASE_DIR / ".env")
+except Exception:
+    pass
+
+DEBUG = False
 ALLOWED_HOSTS = []
 
-SECRET_KEY = os.getenv("DJANGO_SECRET_KEY", "change-me-in-prod")  # env-driven
+SECRET_KEY = os.getenv("DJANGO_SECRET_KEY")
 
 INSTALLED_APPS = [
     "django.contrib.admin",
@@ -68,7 +75,7 @@ TEMPLATES = [
 WSGI_APPLICATION = "engine.wsgi.application"
 ASGI_APPLICATION = "engine.asgi.application"
 
-# Databases: define in dev/prod
+
 DATABASES = {}
 
 AUTH_PASSWORD_VALIDATORS = [
